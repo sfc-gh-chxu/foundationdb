@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbserver/BlobWorker.h"
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/BlobGranuleFiles.h"
@@ -37,9 +38,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
 
-#include "fdbserver/BlobWorker.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -2674,7 +2673,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 							for (auto& delta : deltas.mutations) {
 								metadata->bufferedDeltaBytes += delta.totalSize();
 								bwData->stats.changeFeedInputBytes += delta.totalSize();
-								bwData->stats.mutationBytesBuffered += delta.totalSize();
+								bwData->policyEngine.addBufferedBytes(delta.totalSize(), &bwData->stats);
 
 								DEBUG_MUTATION("BlobWorkerBuffer", deltas.version, delta, bwData->id)
 								    .detail("Granule", metadata->keyRange)
@@ -2712,7 +2711,10 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			bool forceFlush = !forceFlushVersions.empty() && forceFlushVersions.back() > metadata->pendingDeltaVersion;
 			bool doEarlyFlush = !metadata->currentDeltas.empty() && metadata->doEarlyReSnapshot();
 			CODE_PROBE(forceFlush, "Force flushing granule");
-			if ((processedAnyMutations && metadata->bufferedDeltaBytes >= writeAmpTarget.getDeltaFileBytes()) ||
+			if ((processedAnyMutations &&
+			     bwData->policyEngine.checkTooBigDeltaFile(metadata->bufferedDeltaBytes,
+			                                               writeAmpTarget.getDeltaFileBytes(),
+			                                               writeAmpTarget.getBytesBeforeCompact())) ||
 			    forceFlush || doEarlyFlush) {
 				TraceEvent(SevDebug, "BlobGranuleDeltaFile", bwData->id)
 				    .detail("Granule", metadata->keyRange)
@@ -2812,7 +2814,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				metadata->bufferedDeltaVersion = lastDeltaVersion; // In case flush was forced at non-mutation version
 				metadata->bytesInNewDeltaFiles += metadata->bufferedDeltaBytes;
 
-				bwData->stats.mutationBytesBuffered -= metadata->bufferedDeltaBytes;
+				bwData->policyEngine.removeBufferedBytes(metadata->bufferedDeltaBytes, &bwData->stats);
 
 				// reset current deltas
 				metadata->currentDeltas = Standalone<GranuleDeltas>();
@@ -2980,7 +2982,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		metadata->activeCFData.set(Reference<ChangeFeedData>());
 
 		// clear out buffered data
-		bwData->stats.mutationBytesBuffered -= metadata->bufferedDeltaBytes;
+		bwData->policyEngine.removeBufferedBytes(metadata->bufferedDeltaBytes, &bwData->stats);
 
 		if (e.code() == error_code_operation_cancelled) {
 			throw;
