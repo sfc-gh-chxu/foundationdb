@@ -22,8 +22,10 @@
 #define FDBSERVER_BLOBWORKER_H
 
 #include "fdbclient/BlobWorkerCommon.h"
+#include "fdbclient/DatabaseContext.h"
 
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
+#include "fdbserver/BlobWorkerFlushPolicyEngine.actor.h"
 #include "fdbserver/Knobs.h"
 
 #include <vector>
@@ -160,6 +162,7 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	KeyRangeMap<GranuleRangeMetadata> granuleMetadata;
 	BGTenantMap tenantData;
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
+    PolicyEngine policyEngine;
 
 	// contains the history of completed granules before the existing ones. Maps to the latest one, and has
 	// back-pointers to earlier granules
