@@ -22,6 +22,7 @@
 #define FDBCLIENT_BLOBWORKERCOMMON_H
 
 #include "fdbrpc/Stats.h"
+#include "fdbclient/FDBTypes.h"
 
 struct BlobWorkerStats {
 	CounterCollection cc;

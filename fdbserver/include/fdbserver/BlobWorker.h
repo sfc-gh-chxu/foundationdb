@@ -22,6 +22,7 @@
 #define FDBSERVER_BLOBWORKER_H
 
 #include "fdbclient/BlobWorkerCommon.h"
+#include "fdbclient/DatabaseContext.h"
 
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/BlobWorkerFlushPolicyEngine.actor.h"
