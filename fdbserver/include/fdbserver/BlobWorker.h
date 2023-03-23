@@ -25,12 +25,14 @@
 #include "fdbclient/DatabaseContext.h"
 
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
-#include "fdbserver/BlobWorkerFlushPolicyEngine.actor.h"
 #include "fdbserver/Knobs.h"
 
 #include <vector>
 
 #include "flow/actorcompiler.h" // has to be last include
+#include "flow/genericactors.actor.h"
+
+struct BlobWorkerFlushPolicyEngine;
 
 struct GranuleStartState {
 	UID granuleID;
@@ -84,6 +86,8 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	Promise<Void> historyLoaded;
 
 	Promise<Void> resumeSnapshot;
+	AsyncTrigger topMemoryFlush;
+	bool topMemoryFlushTest = false;
 
 	AsyncVar<Reference<ChangeFeedData>> activeCFData;
 
@@ -92,6 +96,8 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	GranuleReadStats readStats;
 	bool rdcCandidate;
 	Promise<Void> runRDC;
+
+	WriteAmpTarget writeAmpTarget;
 
 	void resume();
 	void resetReadStats();
@@ -143,6 +149,20 @@ struct GranuleHistoryEntry : NonCopyable, ReferenceCounted<GranuleHistoryEntry> 
 	  : range(range), granuleID(granuleID), startVersion(startVersion), endVersion(endVersion) {}
 };
 
+struct GranuleMemoryBufferedEntry {
+	int64_t memoryBuffered;
+	Reference<GranuleMetadata> granule;
+	GranuleMemoryBufferedEntry(int64_t memoryBuffered, Reference<GranuleMetadata> granule)
+	  : memoryBuffered(memoryBuffered), granule(granule) {}
+};
+
+// we need to find the granules that are using the most memory
+struct OrderForTopKMemory {
+	bool operator()(GranuleMemoryBufferedEntry const& a, GranuleMemoryBufferedEntry const& b) const {
+		return a.memoryBuffered > b.memoryBuffered;
+	}
+};
+
 struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	UID id;
 	Database db;
@@ -162,7 +182,7 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	KeyRangeMap<GranuleRangeMetadata> granuleMetadata;
 	BGTenantMap tenantData;
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
-    PolicyEngine policyEngine;
+	Reference<BlobWorkerFlushPolicyEngine> bwPolicyEngine;
 
 	// contains the history of completed granules before the existing ones. Maps to the latest one, and has
 	// back-pointers to earlier granules
@@ -199,20 +219,7 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 
 	bool isFullRestoreMode = false;
 
-	BlobWorkerData(UID id, Reference<AsyncVar<ServerDBInfo> const> dbInfo, Database db, IKeyValueStore* storage)
-	  : id(id), db(db), storage(storage), tenantData(BGTenantMap(dbInfo)), dbInfo(dbInfo),
-	    initialSnapshotLock(new FlowLock(SERVER_KNOBS->BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM)),
-	    resnapshotBudget(new FlowLock(SERVER_KNOBS->BLOB_WORKER_RESNAPSHOT_BUDGET_BYTES)),
-	    deltaWritesBudget(new FlowLock(SERVER_KNOBS->BLOB_WORKER_DELTA_WRITE_BUDGET_BYTES)),
-	    stats(id,
-	          SERVER_KNOBS->WORKER_LOGGING_INTERVAL,
-	          initialSnapshotLock,
-	          resnapshotBudget,
-	          deltaWritesBudget,
-	          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	          SERVER_KNOBS->FILE_LATENCY_SKETCH_ACCURACY,
-	          SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-	    encryptMode(EncryptionAtRestMode::DISABLED) {}
+	BlobWorkerData(UID id, Reference<AsyncVar<ServerDBInfo> const> dbInfo, Database db, IKeyValueStore* storage);
 
 	bool managerEpochOk(int64_t epoch);
 	bool isFull();

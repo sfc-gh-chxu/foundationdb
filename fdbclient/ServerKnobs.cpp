@@ -1067,6 +1067,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BLOB_WORKER_REJOIN_TIME,                              10.0 );
 	init( BLOB_WORKER_FLUSH_POLICY,                                1 ); if ( randomize && BUGGIFY ) BLOB_WORKER_FLUSH_POLICY = deterministicRandom()->randomInt(0, 1);
 	init( BLOB_WORKER_MEMORY_PROVISION,                  2*1024*1024 );
+	init( BLOB_WORKER_FLUSH_TOPK_GRANULES,                            2 );
 
 	init( BLOB_MANAGER_STATUS_EXP_BACKOFF_MIN,                   0.1 );
 	init( BLOB_MANAGER_STATUS_EXP_BACKOFF_MAX,                   5.0 );

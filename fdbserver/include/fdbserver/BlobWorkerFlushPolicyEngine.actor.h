@@ -17,17 +17,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
+#pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_BLOBWORKER_FLUSH_POLICY_ENGINE_G_H)
 #define FDBSERVER_BLOBWORKER_FLUSH_POLICY_ENGINE_G_H
 #include "fdbserver/BlobWorkerFlushPolicyEngine.actor.g.h"
 #elif !defined(FDBSERVER_BLOBWORKER_FLUSH_POLICY_ENGINE_ACTOR_H)
 #define FDBSERVER_BLOBWORKER_FLUSH_POLICY_ENGINE_ACTOR_H
 
-#pragma once
+#include "fdbclient/BlobWorkerCommon.h"
 
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
-#include "fdbclient/BlobWorkerCommon.h"
+#include "fdbserver/BlobWorker.h"
 
 #include "flow/FastRef.h"
 #include "flow/actorcompiler.h" // has to be last include
@@ -35,15 +35,19 @@
 // This module offers different policies to write/flush the delta file. It can also monitor the whole memory usage
 //
 
-struct PolicyEngine {
+struct BlobWorkerFlushPolicyEngine : NonCopyable, ReferenceCounted<BlobWorkerFlushPolicyEngine> {
+public:
 	// belong to bwData;
 	// PromiseStream<Future<Void>> addActor;
+	Promise<Void> memoryFull;
+	Future<Void> monitorFuture;
 	enum FlushPolicy { singleGranuleFlush = 0, topKMemoryGranuleFlush = 1, topMemoryGranuleFlush = 2, END };
 
-	PolicyEngine() : globleMutationBytesBuffered(0) {
+	BlobWorkerFlushPolicyEngine() : globleMutationBytesBuffered(0) {
 		flushPolicy = (FlushPolicy)(SERVER_KNOBS->BLOB_WORKER_FLUSH_POLICY);
 		if (flushPolicy == topKMemoryGranuleFlush) {
 			fullMemoryProvision = SERVER_KNOBS->BLOB_WORKER_MEMORY_PROVISION;
+			topK = 2;
 		}
 	}
 
@@ -51,10 +55,15 @@ struct PolicyEngine {
 	void removeBufferedBytes(int64_t bufferedMutationBytes, BlobWorkerStats* stats);
 	bool checkTooBigDeltaFile(int64_t bufferedDeltaBytes, int64_t writeAmpDeltaBytes, int64_t bytesBeforeCompact);
 
+	void start(Reference<BlobWorkerData> bwData);
+
 private:
 	uint32_t flushPolicy;
 	int64_t globleMutationBytesBuffered;
 	int64_t fullMemoryProvision;
+	int64_t singleFileUpperbound;
+	int topK;
+	ACTOR Future<Void> monitorAndflushTopKMemory(Reference<BlobWorkerData> bwData);
 };
 
 #endif
